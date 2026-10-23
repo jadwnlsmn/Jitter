@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.lnk
+# per-user data: settings, saved routes, and what Immerse learned about this machine's apps
+settings.json
+packages.json
+routes/
+addresses/
+journal*.jsonl
+gauntlet/gauntlet-report.txt
+
+# local notes and generated caches
+HANDOFF.md
+graphify-out/

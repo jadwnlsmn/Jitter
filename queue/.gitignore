@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+.pytest_cache/
+# per-user: the workers Claude wrote for this machine, what they noticed, and settings
+data/
+workers/
+settings.json

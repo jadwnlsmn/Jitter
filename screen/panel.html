@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jitter</title>
+<style>
+  :root {
+    --bg: #0e0e10; --side: #131316; --card: #18181c; --line: #26262c; --hover: #1f1f24;
+    --text: #ececf1; --dim: #8b8b96; --faint: #5c5c66; --accent: #ffba69; --accent-soft: #ffba6926;
+    --mono: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); overflow: hidden;
+    font: 14px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; user-select: none; }
+  button, input, textarea { font: inherit; color: inherit; }
+  .app { display: grid; grid-template-columns: 208px 1fr; grid-template-rows: 44px 1fr; height: 100%; }
+
+  /* title bar */
+  .bar { grid-column: 1 / -1; display: flex; align-items: center; padding-left: 20px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: .2px; }
+  .logo { width: 22px; height: 22px; display: block; }
+  .version { margin-top: auto; padding: 12px; color: var(--faint); font-size: 12px; }
+  .bar .drag { flex: 1; align-self: stretch; }
+  .win { width: 46px; height: 44px; border: 0; background: none; color: var(--dim); cursor: pointer;
+    font: 10px "Segoe Fluent Icons", "Segoe MDL2 Assets"; }
+  .win:hover { background: var(--hover); color: var(--text); }
+  .win.x:hover { background: #c42b1c; color: #fff; }
+
+  /* sidebar */
+  nav { padding: 8px 12px; display: flex; flex-direction: column; gap: 2px; }
+  nav button { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border: 0; border-radius: 8px;
+    background: none; color: var(--dim); cursor: pointer; text-align: left; }
+  nav button:hover { background: var(--hover); color: var(--text); }
+  nav button.on { background: var(--hover); color: var(--text); box-shadow: inset 3px 0 0 var(--accent); }
+  nav svg { width: 18px; height: 18px; flex: none; }
+  .navsearch { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; padding: 7px 10px; border: 1px solid var(--line);
+    border-radius: 8px; background: var(--card); color: var(--faint); }
+  .navsearch:focus-within { border-color: var(--accent); }
+  .navsearch svg { width: 14px; height: 14px; }
+  .navsearch input { flex: 1; min-width: 0; border: 0; background: none; outline: none; font-size: 13px; user-select: text; }
+  .finds { display: flex; flex-direction: column; gap: 2px; margin: -4px 0 10px; }
+  .finds:empty { display: none; }
+  .find { padding: 7px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--text); }
+  .find:hover, .find.sel { background: var(--hover); }
+  .find small { display: block; color: var(--faint); font-size: 11.5px; }
+  .find.none { color: var(--faint); cursor: default; }
+  .flash { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 10px; }
+  nav { overflow-y: auto; }
+  .navsec { padding: 14px 12px 4px; font-size: 11px; font-weight: 700; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--faint); }
+  .navblank { padding: 4px 12px 8px; color: var(--faint); font-size: 12px; font-style: italic; }
+  .pill { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent);
+    color: #1a1000; font-size: 11px; font-weight: 700; display: none; align-items: center; justify-content: center; }
+  .pill.show { display: inline-flex; }
+  .mrow { display: flex; gap: 16px; flex-wrap: wrap; }
+  .mrow label { color: var(--dim); display: flex; align-items: center; gap: 6px; }
+  textarea { width: 100%; padding: 9px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+    outline: none; resize: vertical; }
+  textarea:focus { border-color: var(--accent); }
+  .checkin { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 12px; padding: 14px 16px;
+    margin-bottom: 12px; }
+  .checkin .q { margin-bottom: 10px; }
+  .checkin .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .checkin input { flex: 1; min-width: 160px; padding: 7px 10px; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; outline: none; }
+  .mcard { padding: 14px 16px; }
+  .mcard + .mcard { border-top: 1px solid var(--line); }
+  .mcard .top { display: flex; align-items: baseline; gap: 10px; }
+  .mcard .goal { flex: 1; }
+  .mstatus { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: var(--hover); color: var(--dim); }
+  .mstatus.running { background: #1e3a24; color: #7ee29a; } .mstatus.waiting { background: var(--accent-soft); color: var(--accent); }
+  .mstatus.done { background: var(--hover); color: var(--faint); }
+  .tasks { margin-top: 8px; font-size: 13px; color: var(--dim); }
+  .tasks div { padding: 2px 0; }
+  .linkbtn { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; font-size: 13px; }
+
+  /* pages */
+  main { overflow-y: auto; padding: 8px 40px 40px 32px; }
+  section { display: none; max-width: 640px; }
+  section.on { display: block; animation: in .18s ease-out; }
+  @keyframes in { from { opacity: 0; transform: translateY(4px); } }
+  h1 { font: 600 26px/1.2 "Segoe UI Variable Display", "Segoe UI", sans-serif; margin: 18px 0 6px; }
+  .sub { color: var(--dim); margin-bottom: 28px; }
+  .group { background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+  .item { display: flex; align-items: center; gap: 16px; padding: 16px 18px; }
+  .item + .item { border-top: 1px solid var(--line); }
+  .item .what { flex: 1; }
+  .item small { display: block; color: var(--dim); font-size: 12.5px; }
+  .note { color: var(--faint); font-size: 12.5px; margin-top: 14px; }
+
+  /* switch */
+  .switch { position: relative; width: 42px; height: 24px; flex: none; }
+  .switch input { opacity: 0; position: absolute; inset: 0; margin: 0; cursor: pointer; z-index: 1; }
+  .switch span { position: absolute; inset: 0; border-radius: 12px; background: #2c2c33; transition: .18s; }
+  .switch span::after { content: ""; position: absolute; left: 4px; top: 4px; width: 16px; height: 16px;
+    border-radius: 50%; background: #9a9aa5; transition: .18s; }
+  .switch input:checked + span { background: var(--accent); }
+  .switch input:checked + span::after { transform: translateX(18px); background: #fff; }
+  .switch input:disabled + span { opacity: .4; }
+
+  /* inputs */
+  .num { width: 76px; padding: 6px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+    text-align: right; outline: none; }
+  .num:focus, .search input:focus, .chips input:focus { border-color: var(--accent); }
+  input[type=range] { accent-color: var(--accent); width: 140px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 14px 18px; }
+  .chip { display: flex; align-items: center; gap: 6px; padding: 3px 6px 3px 10px; border-radius: 99px;
+    background: var(--hover); font-size: 13px; }
+  .chip button { border: 0; background: none; color: var(--dim); cursor: pointer; padding: 0 4px; }
+  .chip button:hover { color: var(--text); }
+  .chip.fixed { color: var(--dim); padding-right: 10px; }
+  .chips input { flex: 1; min-width: 160px; padding: 4px 8px; background: none; border: 1px solid transparent;
+    border-radius: 6px; outline: none; }
+  .btn { padding: 8px 18px; border: 0; border-radius: 8px; background: var(--accent); color: #1a1000;
+    font-weight: 600; cursor: pointer; }
+  .btn:hover { filter: brightness(1.1); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.ghost { background: var(--hover); color: var(--text); font-weight: 500; }
+  .pkg-add { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 14px 18px; margin-top: 12px; }
+  .pkg-add input { padding: 7px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+    outline: none; user-select: text; }
+  .pkg-add input:focus { border-color: var(--accent); }
+  .pkg-add .btn { grid-column: 2; justify-self: end; }
+  .consent { color: var(--dim); font-size: 12.5px; max-width: 180px; text-align: right; }
+  .item:hover .del { visibility: visible; }
+  .log { margin-top: 16px; padding: 14px 18px; font: 12.5px/1.6 var(--mono); color: var(--dim);
+    white-space: pre-wrap; max-height: 260px; overflow-y: auto; }
+  .log:empty { display: none; }
+
+  /* library tree */
+  .search { display: flex; gap: 8px; margin-bottom: 16px; }
+  .search input { flex: 1; padding: 9px 14px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; outline: none; user-select: text; }
+  .icon-btn { width: 40px; border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+    color: var(--dim); cursor: pointer; display: grid; place-items: center; }
+  .icon-btn:hover { color: var(--text); border-color: var(--faint); }
+  .tree { padding: 6px 0; font-size: 13.5px; }
+  .row { display: flex; align-items: center; gap: 6px; padding: 4px 12px; cursor: default; border-radius: 6px; margin: 0 6px; }
+  .row:hover { background: var(--hover); }
+  .row .chev { width: 14px; color: var(--faint); transition: transform .12s; flex: none; font-size: 10px; }
+  .row.open > .chev { transform: rotate(90deg); }
+  .row.leaf > .chev { visibility: hidden; }
+  .row.branch { cursor: pointer; }
+  .row .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .code { font-family: var(--mono); font-size: 12.5px; color: #c9c9d3; user-select: text; }
+  .row .dimtext { color: var(--dim); font-size: 12.5px; }
+  .row mark { background: var(--accent-soft); color: var(--accent); border-radius: 3px; }
+  .count { color: var(--faint); font-size: 12px; }
+  .del { visibility: hidden; border: 0; background: none; color: var(--faint); cursor: pointer; padding: 0 4px; }
+  .row:hover .del { visibility: visible; }
+  .del:hover { color: #ff6b6b; }
+  .empty { color: var(--faint); padding: 12px 20px; }
+
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); opacity: 0;
+    background: #26262c; padding: 8px 16px; border-radius: 8px; font-size: 13px; transition: .2s; pointer-events: none; }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  ::-webkit-scrollbar { width: 10px; } ::-webkit-scrollbar-thumb { background: #2a2a31; border-radius: 5px; border: 3px solid var(--bg); }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="bar">
+    <div class="brand pywebview-drag-region"><img class="logo" src="assets/logo.svg" alt="">Jitter</div>
+    <div class="drag pywebview-drag-region"></div>
+    <button class="win" title="Minimize" onclick="api().minimize()">&#xE921;</button>
+    <button class="win x" title="Close" onclick="api().close()">&#xE8BB;</button>
+  </div>
+
+  <nav>
+    <label class="navsearch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg><input id="find" placeholder="Search settings" autocomplete="off" spellcheck="false"></label>
+    <div class="finds" id="finds"></div>
+    <div class="navsec">Screen</div>
+    <button data-page="access" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z"/></svg>Access</button>
+    <button data-page="behavior"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Behavior</button>
+    <button data-page="immerse"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>Immerse</button>
+    <button data-page="library"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 4h4v16H5zM11 4h4v16h-4zM17 5l3 .8-3.5 14.5-3-.8"/></svg>Library</button>
+
+    <div class="navsec">Queue</div>
+    <div class="comp-queue">
+      <button data-page="missions"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg>Missions <span class="pill" id="checkin-pill"></span></button>
+      <button data-page="workers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Workers</button>
+      <button data-page="activity"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>Activity</button>
+      <button data-page="qsettings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg>Settings</button>
+    </div>
+    <div class="navblank comp-queue-off">Not installed</div>
+
+    <div class="navsec">Agentic</div>
+    <div class="navblank comp-agentic-off">Not installed</div>
+    <div class="comp-agentic"><button data-page="agentic">Agentic</button></div>
+
+    <div class="version" id="version"></div>
+  </nav>
+
+  <main>
+    <section id="access" class="on">
+      <h1>Access</h1>
+      <p class="sub">What Claude may do. Applies to new Claude sessions.</p>
+      <div class="group" id="perms"></div>
+      <p class="note" id="perm-note">Claude's built-in safety rules stay on.</p>
+      <h1 style="font-size:16px;margin-top:32px">Off-limits windows</h1>
+      <p class="sub" style="margin-bottom:12px">Jitter won't look at, click or type into any window, tab or app whose name contains one of these words. If Claude says something is "off limits", this is why.</p>
+      <div class="group">
+        <div class="item"><div class="what">Always off-limits<small>Terminals and Claude itself. Fixed, because typing there could run anything. It matches names that merely contain these words too, like an app called Claudeswap.</small></div></div>
+        <div class="chips" id="fixed-chips" style="padding-top:0"></div>
+        <div class="item" style="border-top:1px solid var(--line)"><div class="what">Also off-limits<small>Your own additions. Remove one to let Claude back in.</small></div></div>
+        <div class="chips" id="access-chips" style="padding-top:0"><input id="access-chip-in" placeholder="Add a window or tab name, press Enter"></div>
+      </div>
+    </section>
+
+    <section id="behavior">
+      <h1>Behavior</h1>
+      <p class="sub">How Jitter acts while it has your screen.</p>
+      <div class="group">
+        <div class="item"><div class="what">Countdown before taking over<small>Shown in the corner badge; click the badge to pause. 0 turns it off</small></div>
+          <input class="num" id="countdown_seconds" type="number" min="0" max="10"> <span class="count">sec</span></div>
+        <div class="item"><div class="what">Release the screen after<small>Idle time before the orange border clears on its own</small></div>
+          <input class="num" id="hold_seconds" type="number" min="10" max="3600"> <span class="count">sec</span></div>
+        <div class="item"><div class="what">Border thickness</div>
+          <input class="num" id="border_px" type="number" min="1" max="60"> <span class="count">px</span></div>
+        <div class="item"><div class="what">Border opacity</div>
+          <input id="opacity" type="range" min="0.1" max="1" step="0.05"></div>
+      </div>
+      <h1 style="font-size:16px;margin-top:32px">Sign-ins</h1>
+      <p class="sub" style="margin-bottom:12px">When a page needs your login, a password, a 2FA code or a payment, Claude opens it, puts the cursor in the form and hands you the screen. Jitter can't see anything until you click the badge.</p>
+      <div class="group">
+        <div class="item"><div class="what">Wait for me up to<small>Then Claude checks back and keeps waiting</small></div>
+          <input class="num" id="handoff_minutes" type="number" min="1" max="60"> <span class="count">min</span></div>
+      </div>
+      <h1 style="font-size:16px;margin-top:32px">Login packages</h1>
+      <p class="sub" style="margin-bottom:12px">Logins Jitter can fill in for Claude. Claude only knows a trusted package's name and site, never what's inside, and each delivery waits for you to approve it in a box in the middle of the screen. Stored encrypted for your Windows account.</p>
+      <div class="group" id="pkgs"></div>
+      <div class="group pkg-add">
+        <input id="pk-name" placeholder="Name, e.g. GitHub">
+        <input id="pk-site" placeholder="Site, e.g. github.com">
+        <input id="pk-user" placeholder="Username or email">
+        <input id="pk-pass" type="password" placeholder="Password">
+        <button class="btn" id="pk-add">Add package</button>
+      </div>
+    </section>
+
+    <section id="immerse">
+      <h1>Immerse</h1>
+      <p class="sub">Let Jitter learn your open apps and Chrome tabs, so Claude can act without exploring first.</p>
+      <div class="group">
+        <div class="item"><div class="what">Chrome tabs to visit<small>Windows and tabs are put back afterwards</small></div>
+          <input class="num" id="tabs" type="number" min="0" max="50" value="12"></div>
+        <div class="item"><div class="what">Open the apps you want mapped, then run.<small>Press any key to stop</small></div>
+          <button class="btn" id="run">Run Immerse</button></div>
+      </div>
+      <div class="group log" id="log"></div>
+    </section>
+
+    <section id="library">
+      <h1>Library</h1>
+      <p class="sub">Saved routes and what Immerse learned.</p>
+      <div class="search">
+        <input id="q" placeholder="Search routes, apps, buttons, links...">
+        <button class="icon-btn" id="go" title="Search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg></button>
+      </div>
+      <div class="group tree" id="tree"></div>
+    </section>
+
+    <section id="missions">
+      <h1>Missions</h1>
+      <p class="sub">Give Claude a goal and a budget. It plans, does the urgent work first, and asks you about anything only you should decide.</p>
+      <div id="checkins"></div>
+      <div class="group" id="mission-list"></div>
+      <h1 style="font-size:16px;margin-top:28px">New mission</h1>
+      <div class="group pkg-add">
+        <textarea id="m-goal" rows="3" placeholder="What should Claude work on? e.g. 'Go through my school portal: list everything due, open each one, and draft answers for me to check. Don't submit anything.'"></textarea>
+        <div class="mrow">
+          <label>Run for <input class="num" id="m-hours" type="number" min="0.5" max="24" step="0.5" value="3"> h</label>
+          <label>Budget <input class="num" id="m-budget" type="number" min="1" max="200" value="40"> wakes</label>
+        </div>
+        <textarea id="m-perms" rows="2" placeholder="What may Claude do on its own? e.g. 'Reply in my class Discord and Messenger. Draft but never submit schoolwork. Never send money, buy anything, or post publicly.'"></textarea>
+        <button class="btn" id="m-start">Start mission</button>
+      </div>
+      <p class="note">Anything in "always ask" (payments, submitting graded work, posting publicly) is handed back to you as a check-in, whatever the permissions say.</p>
+    </section>
+
+    <section id="workers">
+      <h1>Workers</h1>
+      <p class="sub">Watchers Claude wrote for a "tell me when..." request. They only observe; they don't act.</p>
+      <div class="group" id="worker-list"></div>
+    </section>
+
+    <section id="activity">
+      <h1>Activity</h1>
+      <p class="sub">What the watchers noticed, and the background runner's health.</p>
+      <div class="group">
+        <div class="item"><div class="what">Background runner<small>Starts with Windows, keeps watching with no session open</small></div>
+          <span id="sup-status" class="count"></span></div>
+        <div class="item"><div class="what">Pause everything<small>Stops all workers and missions at once</small></div>
+          <span class="switch"><input type="checkbox" id="q-paused"><span></span></span></div>
+      </div>
+      <div class="group log" id="notes-log"></div>
+    </section>
+
+    <section id="qsettings">
+      <h1>Queue settings</h1>
+      <p class="sub">Limits and quiet hours for unattended work.</p>
+      <div class="group">
+        <div class="item"><div class="what">Quiet hours<small>No screen work between these hours. Leave 0 and 0 for none</small></div>
+          <span><input class="num" id="quiet-start" type="number" min="0" max="23"> to <input class="num" id="quiet-end" type="number" min="0" max="23"></span></div>
+        <div class="item"><div class="what">Most wakes per hour, per worker</div>
+          <input class="num" id="max-wakes" type="number" min="1" max="60"></div>
+        <div class="item"><div class="what">Give up on a wake after<small>A single headless task that runs too long is stopped</small></div>
+          <input class="num" id="wake-timeout" type="number" min="60" max="3600"> <span class="count">sec</span></div>
+      </div>
+      <h1 style="font-size:16px;margin-top:28px">Always ask first</h1>
+      <p class="sub" style="margin-bottom:12px">Claude hands these back to you no matter the mission's permissions. One phrase per line.</p>
+      <div class="group"><div class="chips" id="ask-chips"><input id="ask-in" placeholder="Add a phrase, press Enter"></div></div>
+    </section>
+
+    <section id="agentic">
+      <h1>Agentic</h1>
+      <p class="sub">The voice between you and Claude. Not installed yet.</p>
+    </section>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const api = () => window.pywebview.api;
+const $ = (s) => document.querySelector(s);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+let state, toastTimer;
+
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 1800);
+}
+
+document.querySelectorAll("nav button").forEach((b) => b.onclick = () => {
+  document.querySelectorAll("nav button, section").forEach((x) => x.classList.remove("on"));
+  b.classList.add("on"); $("#" + b.dataset.page).classList.add("on");
+});
+
+// --- search: find any setting on any page, then jump to it ---
+function searchables() {
+  const out = [];
+  document.querySelectorAll("nav button[data-page]").forEach((b) => {
+    const page = $("#" + b.dataset.page);
+    if (!page || !b.offsetParent) return;  // a component that isn't installed
+    const where = b.childNodes[b.childNodes.length > 1 ? 1 : 0].textContent.trim() || b.textContent.trim();
+    out.push({ b, el: page, title: where, where: "Page", text: where });
+    const heads = [...page.querySelectorAll("h1")];
+    page.querySelectorAll("h1, .item, p.sub, p.note, .btn, .chip").forEach((el) => {
+      const what = el.matches(".item") ? el.querySelector(".what") : null;
+      const title = (what ? what.childNodes[0]?.textContent : el.textContent || "").trim();
+      if (!title) return;
+      const head = heads.filter((h) => h !== el && (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)).pop();
+      const section = head && head.textContent.trim() !== where ? `${where} › ${head.textContent.trim()}` : where;
+      out.push({ b, el, title: title.length > 46 ? title.slice(0, 44) + "…" : title, where: section,
+                 text: `${el.textContent} ${section}`.toLowerCase() });
+    });
+  });
+  return out;
+}
+let finds = [], picked = 0;
+function showFinds() {
+  const q = $("#find").value.trim().toLowerCase(), box = $("#finds");
+  box.replaceChildren();
+  if (!q) { finds = []; return; }
+  const words = q.split(/\s+/);
+  finds = searchables().filter((f) => words.every((w) => f.text.includes(w) || f.title.toLowerCase().includes(w)))
+    .sort((a, b) => (b.title.toLowerCase().includes(q) - a.title.toLowerCase().includes(q))).slice(0, 8);
+  picked = 0;
+  if (!finds.length) { box.append(el("div", "find none", "Nothing matches")); return; }
+  finds.forEach((f, i) => {
+    const row = el("div", "find" + (i === picked ? " sel" : ""), f.title);
+    row.append(el("small", null, f.where));
+    row.onclick = () => go(f);
+    box.append(row);
+  });
+}
+function go(f) {
+  f.b.click();  // open the page
+  $("#find").value = ""; showFinds();
+  f.el.scrollIntoView({ block: "center", behavior: "smooth" });
+  f.el.classList.add("flash");
+  setTimeout(() => f.el.classList.remove("flash"), 1600);
+}
+$("#find").addEventListener("input", showFinds);
+$("#find").addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { e.target.value = ""; showFinds(); e.target.blur(); }
+  if (!finds.length) return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    picked = (picked + (e.key === "ArrowDown" ? 1 : finds.length - 1)) % finds.length;
+    [...$("#finds").children].forEach((r, i) => r.classList.toggle("sel", i === picked));
+  }
+  if (e.key === "Enter") go(finds[picked]);
+});
+document.addEventListener("keydown", (e) => {  // Ctrl+F or Ctrl+K jumps to search
+  if (e.ctrlKey && (e.key === "f" || e.key === "k")) { e.preventDefault(); $("#find").focus(); }
+});
+
+// --- access ---
+function renderPerms() {
+  const box = $("#perms"); box.replaceChildren();
+  state.permissions.forEach((p, i) => {
+    const row = el("label", "item"), sw = el("span", "switch"), input = el("input");
+    input.type = "checkbox"; input.checked = p.on; input.disabled = state.claude_settings_broken;
+    input.onchange = async () => {
+      try { await api().set_permission(i, input.checked); toast(input.checked ? "Allowed" : "Turned off"); }
+      catch (e) { input.checked = !input.checked; toast("Couldn't update Claude's settings"); }
+    };
+    sw.append(input, el("span"));
+    row.append(el("div", "what", p.label), sw);
+    box.append(row);
+  });
+  if (state.claude_settings_broken) $("#perm-note").textContent = "Your Claude settings file has a syntax error. Fix it to use these switches.";
+}
+
+// --- behavior: saves on change ---
+let saveTimer;
+function saveSoon() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    const s = await api().save_settings({
+      countdown_seconds: +$("#countdown_seconds").value, handoff_minutes: +$("#handoff_minutes").value, hold_seconds: +$("#hold_seconds").value, border_px: +$("#border_px").value, opacity: +$("#opacity").value,
+      blocked_titles: state.settings.blocked_titles });
+    state.settings = s; fillBehavior(); toast("Saved");
+  }, 400);
+}
+function fillBehavior() {
+  const s = state.settings;
+  $("#countdown_seconds").value = s.countdown_seconds; $("#handoff_minutes").value = s.handoff_minutes; $("#hold_seconds").value = s.hold_seconds; $("#border_px").value = s.border_px; $("#opacity").value = s.opacity;
+  renderOffLimits();  // the off-limits list lives on the Access page
+}
+// the Access page shows the same off-limits list, so permissions are all in one place
+function renderOffLimits() {
+  const fixed = $("#fixed-chips"), mine = $("#access-chips"), input = $("#access-chip-in");
+  fixed.replaceChildren(...state.always_blocked.map((t) => el("span", "chip fixed", t)));
+  mine.replaceChildren();
+  state.settings.blocked_titles.forEach((t) => {
+    const c = el("span", "chip", t), x = el("button", null, "✕");
+    x.onclick = () => { state.settings.blocked_titles = state.settings.blocked_titles.filter((v) => v !== t); saveSoon(); };
+    c.append(x); mine.append(c);
+  });
+  mine.append(input);
+}
+$("#access-chip-in").addEventListener("keydown", (e) => {
+  const v = e.target.value.trim().toLowerCase();
+  if (e.key === "Enter" && v && !state.settings.blocked_titles.includes(v)) {
+    state.settings.blocked_titles.push(v); e.target.value = ""; saveSoon();
+  }
+});
+["#countdown_seconds", "#handoff_minutes", "#hold_seconds", "#border_px", "#opacity"].forEach((id) => $(id).addEventListener("change", saveSoon));
+
+// --- login packages: Python never hands the page a password back ---
+function renderPackages() {
+  const box = $("#pkgs"); box.replaceChildren();
+  if (!state.packages.length) { box.append(el("div", "empty", "No packages yet")); return; }
+  state.packages.forEach((p) => {
+    const row = el("div", "item"), what = el("div", "what", p.name), sw = el("label", "switch"), input = el("input");
+    what.append(el("small", null, p.site));
+    input.type = "checkbox"; input.checked = p.trusted;
+    input.onchange = async () => {
+      state.packages = await api().trust_package(p.name, input.checked);
+      toast(input.checked ? "Claude can ask for " + p.name : "Claude can't see " + p.name);
+    };
+    sw.append(input, el("span"));
+    const del = el("button", "del", "✕"); del.title = "Delete";
+    del.onclick = async () => {
+      if (confirm(`Delete ${p.name}?`)) { state.packages = await api().delete_package(p.name); renderPackages(); toast("Deleted"); }
+    };
+    row.append(what, el("span", "consent", "I trust and consent Claude with this information"), sw, del);
+    box.append(row);
+  });
+}
+$("#pk-add").onclick = async () => {
+  const fields = ["#pk-name", "#pk-site", "#pk-user", "#pk-pass"].map((id) => $(id));
+  try {
+    state.packages = await api().add_package(...fields.map((f) => f.value));
+    fields.forEach((f) => f.value = ""); renderPackages(); toast("Added. Switch it on to trust Claude with it");
+  } catch (e) { toast("A package needs a name, a site and a password"); }
+};
+
+// --- immerse ---
+$("#run").onclick = async () => {
+  await api().immerse(+$("#tabs").value || 0);
+  $("#run").disabled = true;
+  const poll = setInterval(async () => {
+    const s = await api().immerse_status();
+    $("#log").textContent = s.log.join("\n"); $("#log").scrollTop = 1e9;
+    if (!s.running) { clearInterval(poll); $("#run").disabled = false; reload(); }
+  }, 500);
+};
+
+// --- library: collapsed tree, search opens the matching branches ---
+function prune(nodes, q) {
+  const out = [];
+  for (const n of nodes) {
+    if (n.label.toLowerCase().includes(q)) { out.push(n); continue; }
+    const kids = prune(n.children || [], q);
+    if (kids.length) out.push({ ...n, children: kids });
+  }
+  return out;
+}
+function highlight(span, text, q) {
+  const i = q ? text.toLowerCase().indexOf(q) : -1;
+  if (i < 0) { span.textContent = text; return; }
+  span.append(text.slice(0, i), el("mark", null, text.slice(i, i + q.length)), text.slice(i + q.length));
+}
+function renderTree(nodes, depth, open, q) {
+  return nodes.map((n) => {
+    const wrap = el("div"), kids = n.children || [];
+    const row = el("div", "row " + (kids.length ? "branch" : "leaf") + (open && kids.length ? " open" : ""));
+    row.style.paddingLeft = 10 + depth * 18 + "px";
+    const label = el("span", "label" + (n.code ? " code" : "") + (n.dim ? " dimtext" : ""));
+    highlight(label, n.label, q);
+    row.append(el("span", "chev", "▶"), label);
+    if (n.count != null) row.append(el("span", "count", n.count));
+    if (n.path) {
+      const del = el("button", "del", "✕"); del.title = "Delete";
+      del.onclick = async (e) => {
+        e.stopPropagation();
+        if (confirm(`Delete ${n.label}?`)) { state.library = await api().delete(n.path); renderLibrary(); toast("Deleted"); }
+      };
+      row.append(del);
+    }
+    const box = el("div"); box.hidden = !open;
+    if (kids.length) {
+      box.append(...renderTree(kids, depth + 1, open, q));
+      row.onclick = () => { box.hidden = !box.hidden; row.classList.toggle("open", !box.hidden); };
+    }
+    wrap.append(row, box);
+    return wrap;
+  });
+}
+function renderLibrary() {
+  const q = $("#q").value.trim().toLowerCase(), nodes = q ? prune(state.library, q) : state.library;
+  const tree = $("#tree");
+  tree.replaceChildren(...(nodes.length ? renderTree(nodes, 0, !!q, q) : [el("div", "empty", `Nothing matches "${q}"`)]));
+}
+$("#go").onclick = renderLibrary;
+$("#q").addEventListener("keydown", (e) => { if (e.key === "Enter") renderLibrary(); if (e.key === "Escape") { e.target.value = ""; renderLibrary(); } });
+$("#q").addEventListener("input", (e) => { if (!e.target.value) renderLibrary(); });
+
+// --- Queue section ---
+function applyComponents() {
+  const c = state.components || {};
+  document.querySelectorAll(".comp-queue").forEach((e) => e.style.display = c.queue ? "" : "none");
+  document.querySelectorAll(".comp-queue-off").forEach((e) => e.style.display = c.queue ? "none" : "");
+  document.querySelectorAll(".comp-agentic").forEach((e) => e.style.display = c.agentic ? "" : "none");
+  document.querySelectorAll(".comp-agentic-off").forEach((e) => e.style.display = c.agentic ? "none" : "");
+}
+
+function renderQueue() {
+  const q = state.queue || {};
+  if (!q.installed) return;
+  // check-ins (the approvals that need you) — shown at the top of Missions, and counted on the nav pill
+  const ci = $("#checkins"); ci.replaceChildren();
+  (q.checkins || []).forEach((c) => {
+    const box = el("div", "checkin");
+    box.append(el("div", "q", `Mission #${c.mission_id}: ${c.question}`));
+    const row = el("div", "row");
+    let opts = []; try { opts = JSON.parse(c.options || "[]"); } catch {}
+    if (opts.length) {
+      opts.forEach((o) => { const b = el("button", "btn", o); b.onclick = () => answerCheckin(c.id, o); row.append(b); });
+    } else {
+      const inp = el("input"); inp.placeholder = "Your answer"; inp.onkeydown = (e) => { if (e.key === "Enter" && inp.value.trim()) answerCheckin(c.id, inp.value.trim()); };
+      const b = el("button", "btn", "Send"); b.onclick = () => inp.value.trim() && answerCheckin(c.id, inp.value.trim());
+      row.append(inp, b);
+    }
+    box.append(row); ci.append(box);
+  });
+  const pill = $("#checkin-pill"), n = (q.checkins || []).length;
+  pill.textContent = n; pill.classList.toggle("show", n > 0);
+
+  const ml = $("#mission-list"); ml.replaceChildren();
+  if (!(q.missions || []).length) ml.append(el("div", "item", "No missions yet. Start one below."));
+  const mark = { todo: "·", doing: "▸", done: "✓", blocked: "✗", skipped: "–" };
+  (q.missions || []).forEach((m) => {
+    const card = el("div", "mcard"), top = el("div", "top");
+    top.append(el("div", "goal", m.goal));
+    top.append(el("span", "mstatus " + m.status, m.status));
+    card.append(top);
+    card.append(el("div", "tasks", `${m.wakes_used}/${m.budget_wakes} wakes`));
+    const tl = el("div", "tasks");
+    (m.tasks || []).forEach((t) => {
+      const flags = [t.urgency >= 4 ? "urgent" : "", t.needs_you ? "needs you" : "", t.optional ? "optional" : ""].filter(Boolean).join(", ");
+      tl.append(el("div", null, `${mark[t.status] || "·"} ${t.title}${flags ? " — " + flags : ""}${t.result ? " · " + t.result : ""}`));
+    });
+    card.append(tl);
+    if (["running", "waiting", "planning"].includes(m.status)) {
+      const row = el("div", "row"); row.style.marginTop = "8px"; row.style.gap = "14px";
+      const ext = el("button", "linkbtn", "Extend 1h"); ext.onclick = () => missionAction(m.id, "extend");
+      const can = el("button", "linkbtn", "Cancel"); can.onclick = () => confirm("Cancel this mission?") && missionAction(m.id, "cancel");
+      row.append(ext, can); card.append(row);
+    }
+    ml.append(card);
+  });
+
+  const wl = $("#worker-list"); wl.replaceChildren();
+  if (!(q.workers || []).length) wl.append(el("div", "item", "No workers yet. Ask Claude to watch something for you."));
+  (q.workers || []).forEach((w) => {
+    const row = el("div", "item");
+    const what = el("div", "what"); what.append(document.createTextNode(w.name));
+    const small = el("small", null, w.stimulus + (w.last_error ? "  ⚠ " + w.last_error.slice(0, 80) : ""));
+    what.append(small); row.append(what);
+    const sw = el("span", "switch"), inp = el("input"); inp.type = "checkbox"; inp.checked = !!w.enabled;
+    inp.onchange = async () => { state.queue = await api().queue_set_worker(w.name, inp.checked); renderQueue(); };
+    sw.append(inp, el("span")); row.append(sw);
+    const del = el("button", "linkbtn", "✕"); del.style.marginLeft = "10px";
+    del.onclick = async () => { if (confirm("Remove " + w.name + "?")) { state.queue = await api().queue_remove_worker(w.name); renderQueue(); } };
+    row.append(del); wl.append(row);
+  });
+
+  $("#sup-status").textContent = q.supervisor;
+  $("#q-paused").checked = !!q.paused;
+  const nl = $("#notes-log");
+  nl.textContent = (q.notes || []).map((x) => `${new Date(x.ts * 1000).toLocaleString()}  ${x.worker}: ${x.text}${x.woke === 1 ? "  (woke Claude)" : ""}`).join("\n") || "No activity yet.";
+
+  const s = q.settings || {};
+  $("#quiet-start").value = (s.quiet_hours || [0, 0])[0] || 0;
+  $("#quiet-end").value = (s.quiet_hours || [0, 0])[1] || 0;
+  $("#max-wakes").value = s.max_wakes_per_hour; $("#wake-timeout").value = s.wake_timeout_s;
+  const chips = $("#ask-chips"), input = $("#ask-in");
+  [...chips.querySelectorAll(".chip")].forEach((e) => e.remove());
+  (s.always_ask || []).forEach((t) => {
+    const c = el("span", "chip", t), x = el("button", null, "✕");
+    x.onclick = () => saveQueue({ always_ask: (s.always_ask || []).filter((v) => v !== t) });
+    c.append(x); chips.insertBefore(c, input);
+  });
+}
+
+async function answerCheckin(id, ans) { state.queue = await api().queue_answer_checkin(id, ans); renderQueue(); toast("Answered"); }
+async function missionAction(id, action) { state.queue = await api().queue_mission_action(id, action); renderQueue(); }
+async function saveQueue(patch) { state.queue = await api().queue_save_settings(patch); renderQueue(); toast("Saved"); }
+
+$("#m-start").onclick = async () => {
+  const goal = $("#m-goal").value.trim(); if (!goal) return toast("Describe the mission first");
+  state.queue = await api().queue_start_mission(goal, +$("#m-hours").value, +$("#m-budget").value, $("#m-perms").value.trim());
+  $("#m-goal").value = ""; $("#m-perms").value = ""; renderQueue(); toast("Mission started");
+};
+$("#q-paused").addEventListener("change", (e) => saveQueue({ paused: e.target.checked }));
+["#quiet-start", "#quiet-end"].forEach((id) => $(id).addEventListener("change", () =>
+  saveQueue({ quiet_hours: [+$("#quiet-start").value, +$("#quiet-end").value] })));
+$("#max-wakes").addEventListener("change", (e) => saveQueue({ max_wakes_per_hour: +e.target.value }));
+$("#wake-timeout").addEventListener("change", (e) => saveQueue({ wake_timeout_s: +e.target.value }));
+$("#ask-in").addEventListener("keydown", (e) => {
+  const v = e.target.value.trim();
+  if (e.key === "Enter" && v) { const list = (state.queue.settings.always_ask || []); if (!list.includes(v)) saveQueue({ always_ask: [...list, v] }); e.target.value = ""; }
+});
+
+let qTimer;
+async function reload() {
+  state = await api().state();
+  $("#version").textContent = "Jitter " + state.version;
+  applyComponents();
+  renderPerms(); fillBehavior(); renderPackages(); renderLibrary(); renderQueue();
+  // keep the Queue view live while the panel is open (missions and check-ins change on their own)
+  if (!qTimer && state.components && state.components.queue) qTimer = setInterval(async () => {
+    try { state.queue = await api().queue_state(); renderQueue(); } catch {}
+  }, 4000);
+}
+window.addEventListener("pywebviewready", reload);
+</script>
+</body>
+</html>

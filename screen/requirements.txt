@@ -1,0 +1,12 @@
+﻿mcp>=1.30,<2
+pyautogui
+pillow
+uiautomation
+pywebview
+winrt-runtime
+winrt-Windows.Foundation
+winrt-Windows.Foundation.Collections
+winrt-Windows.Globalization
+winrt-Windows.Graphics.Imaging
+winrt-Windows.Media.Ocr
+winrt-Windows.Storage.Streams
