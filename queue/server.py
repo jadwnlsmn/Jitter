@@ -21,10 +21,13 @@ Writing a worker (add_worker):
 - A Python file that defines check(state) and returns a note string, a list of notes, or None when there's nothing
   new. It runs in a fresh process every interval; `state` is a dict that persists between checks (JSON values
   only). Use it to remember what you've seen so you report only what's new. The first check should record a
-  baseline and return None. helpers.new_items(state, key, items) does exactly that.
-- Build it for this app and this stimulus: there are no templates. Watch whatever fits the source: a web page or
-  API (helpers.fetch), a file, a window's text read in the background (helpers.window_text), anything Python can
-  reach. Workers run with the user's rights.
+  baseline and return None. helpers.new_items(state, key, items) does exactly that. A quiet first check is that
+  working, not a broken worker — don't "fix" it.
+- Don't write one from scratch: copy templates/worker.py and fill its three blanks. Every stimulus is three
+  choices from the palette in helpers.py -- a SOURCE (fetch, window_text, read_file, dir_list, ping), an EXTRACT
+  (match, extract, json_path, count), and a CONDITION (new_items, changed, matched, crossed, every, at_time).
+  Compose those for this app and stimulus; reach past the palette to any Python only when none of the blocks fit.
+  Workers run with the user's rights.
 - Workers only OBSERVE. Never click, type, send, post, or change anything in a worker. Acting is the reaction's job.
 - Notes should be short and self-contained ("Sam in Study Group: see you at 5").
 - The reaction is what a woken Claude will do with each note, unattended, with only the Jitter Screen and Queue
@@ -47,10 +50,11 @@ def add_worker(name: str, stimulus: str, code: str, interval_seconds: float = 60
     """Create or replace a worker. name: lowercase-dashes ('messenger-study-group'). stimulus: the user's request in their
     words. code: Python defining check(state). reaction: what a woken Claude does with each note (empty: notes only).
     wake: False to only collect notes. interval_seconds: 5 or more."""
+    import types
     check_name(name)
     compiled = compile(code, f"{name}.py", "exec")  # a syntax error fails here, not at 3am
-    if "check" not in compiled.co_names:
-        raise ValueError("the code must define check(state)")
+    if not any(isinstance(c, types.CodeType) and c.co_name == "check" for c in compiled.co_consts):
+        raise ValueError("the code must define check(state) as a function (def check(state): ...)")
     (WORKERS / f"{name}.py").write_text(code, encoding="utf-8")
     con = db()
     con.execute("insert or replace into workers(name, stimulus, reaction, interval_s, enabled, wake, created, next_run)"
@@ -97,7 +101,7 @@ def notes(worker: str = "", unread_only: bool = True, mark_read: bool = True, li
     rows = con.execute(q + " order by id desc limit ?", (*args, max(1, min(limit, 500)))).fetchall()[::-1]
     if mark_read and rows:
         con.execute(f"update notes set read=1 where id in ({','.join('?' * len(rows))})", [r["id"] for r in rows])
-    woke = {0: "", 1: " (woke Claude)", -1: " (wake skipped: hourly limit)"}
+    woke = {0: "", 1: " (woke Claude)", -1: " (wake skipped: hourly limit)", -2: " (held for quiet hours)"}
     return "\n".join(f"[{time.strftime('%m-%d %H:%M', time.localtime(r['ts']))}] {r['worker']}: {r['text']}"
                      + woke.get(r["woke"], "") for r in rows) or "no notes"
 
@@ -190,14 +194,20 @@ def plan_done(mission_id: int) -> str:
 @mcp.tool()
 def finish_task(task_id: int, result: str = "done") -> str:
     """Mark a task done with a one-line result (used by the worker Claude when it finishes a task)."""
-    db().execute("update tasks set status='done', result=?, done_at=? where id=?", (result.strip(), time.time(), task_id))
+    con = db()
+    if not con.execute("select 1 from tasks where id=?", (task_id,)).fetchone():
+        raise LookupError(f"no task {task_id}")
+    con.execute("update tasks set status='done', result=?, done_at=? where id=?", (result.strip(), time.time(), task_id))
     return f"task {task_id} done"
 
 
 @mcp.tool()
 def block_task(task_id: int, why: str) -> str:
     """Mark a task blocked with the reason (the worker Claude couldn't finish it)."""
-    db().execute("update tasks set status='blocked', result=? where id=?", (why.strip(), task_id))
+    con = db()
+    if not con.execute("select 1 from tasks where id=?", (task_id,)).fetchone():
+        raise LookupError(f"no task {task_id}")
+    con.execute("update tasks set status='blocked', result=? where id=?", (why.strip(), task_id))
     return f"task {task_id} blocked"
 
 
@@ -206,8 +216,11 @@ def raise_checkin(mission_id: int, question: str, kind: str = "answer", options:
     """Ask the user something and stop: a decision, an approval, or something only they can do. kind: 'approve' or
     'answer'. options: comma-separated choices, if any. The mission waits until they answer in the panel."""
     opts = json.dumps([o.strip() for o in options.split(",") if o.strip()])
-    cid = db().execute("insert into checkins(mission_id, task_id, kind, question, options, ts) values(?,?,?,?,?,?)",
-                       (mission_id, task_id or None, kind.strip(), question.strip(), opts, time.time())).lastrowid
+    con = db()
+    cid = con.execute("insert into checkins(mission_id, task_id, kind, question, options, ts) values(?,?,?,?,?,?)",
+                      (mission_id, task_id or None, kind.strip(), question.strip(), opts, time.time())).lastrowid
+    if task_id:  # park the task so reconcile won't record it 'done'; the answer resumes it (and reaches this task)
+        con.execute("update tasks set status='waiting' where id=? and status='doing'", (task_id,))
     notify(f"Mission #{mission_id} needs you", question.strip()[:200])
     return f"check-in {cid} raised; the mission waits for the user"
 
@@ -236,7 +249,7 @@ def mission(mission_id: int = 0) -> str:
            f"  permissions: {m['permissions'] or '(none set)'}"]
     if m["summary"]:
         out.append(f"  summary: {m['summary']}")
-    mark = {"todo": "·", "doing": "▸", "done": "✓", "blocked": "✗", "skipped": "–"}
+    mark = {"todo": "·", "doing": "▸", "waiting": "❓", "done": "✓", "blocked": "✗", "skipped": "–"}
     for t in con.execute("select * from tasks where mission_id=? order by id", (mission_id,)):
         flags = "".join(f for f, on in (("!", t["urgency"] >= 4), ("@you", t["needs_you"]), ("?opt", t["optional"])) if on)
         out.append(f"  {mark.get(t['status'],'·')} [{t['id']}] {t['title']} {flags}"

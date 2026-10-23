@@ -21,8 +21,11 @@ def main() -> None:
     while True:
         started = time.time()
         p = subprocess.Popen([PYTHON, str(HERE / "supervisor.py")], cwd=HERE, creationflags=NO_WINDOW)
-        p.wait()
-        # ran a while before dying: a transient crash, restart promptly. Died fast: back off up to 5 min.
+        code = p.wait()
+        # A fast, clean exit (0) means another supervisor already owns the single-instance mutex: stop, don't spin.
+        if code == 0 and time.time() - started < 120:
+            return
+        # Ran a while before dying: a transient crash, restart promptly. Died fast with an error: back off up to 5 min.
         backoff = 2 if time.time() - started > 120 else min(backoff * 2, 300)
         time.sleep(backoff)
 

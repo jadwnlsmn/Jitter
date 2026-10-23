@@ -60,7 +60,7 @@ def test_supervisor_records_notes_and_wakes_with_an_hourly_limit(fresh, monkeypa
     rows = con.execute("select text, woke from notes order by id").fetchall()
     assert [r["text"] for r in rows] == ["item 1", "item 2"]
     assert [r["woke"] for r in rows] == [1, -1]  # the second wake hit the hourly limit
-    assert len(fresh) == 1 and "<<<NOTE\nitem 1\nNOTE>>>" in fresh[0] and "say hi" in fresh[0]
+    assert len(fresh) == 1 and "item 1" in fresh[0] and "say hi" in fresh[0]
     assert "notes" in server.notes() or "item 1" in server.notes(unread_only=False)
 
 
@@ -237,22 +237,78 @@ def test_budget_checkin_stop_cancels():
     assert con.execute("select status from missions where id=1").fetchone()[0] == "cancelled"
 
 
-def test_reconcile_closes_a_task_left_in_doing():
+def test_reconcile_blocks_an_unconfirmed_task_and_never_fakes_done():
     import supervisor
     con = db()
     con.execute("insert into missions(id, goal, created, run_until, budget_wakes) values(1,'g',0,9e12,40)")
+    # exit 0 but Claude never called a tool: this must NOT be reported as done (the bug the old test enshrined).
     con.execute("insert into tasks(id, mission_id, title, status, created) values(5,1,'a','doing',0)")
-    con.execute("insert into wakes(id, worker, ts, exit_code, output) values(30,'mission:1/task5',0,0,'did the thing')")
+    con.execute("insert into wakes(id, worker, ts, exit_code, output) values(30,'mission:1/task5',0,0,'talked about it')")
     supervisor._reconcile_task(30, 5)
     t = con.execute("select status, result from tasks where id=5").fetchone()
-    assert t["status"] == "done" and "did the thing" in t["result"]
-    # a failed wake blocks it
-    con.execute("insert into tasks(id, mission_id, title, status, created) values(6,1,'b','doing',0)")
-    con.execute("insert into wakes(id, worker, ts, exit_code, output) values(31,'mission:1/task6',0,1,'crashed')")
-    supervisor._reconcile_task(31, 6)
-    assert con.execute("select status from tasks where id=6").fetchone()[0] == "blocked"
-    # a task already closed by finish_task is left alone
+    assert t["status"] == "blocked" and "without calling" in t["result"]
+    # a task Claude actually closed (finish_task set it done) is left exactly as-is
     con.execute("insert into tasks(id, mission_id, title, status, result, created) values(7,1,'c','done','real',0)")
     con.execute("insert into wakes(id, worker, ts, exit_code, output) values(32,'mission:1/task7',0,0,'x')")
     supervisor._reconcile_task(32, 7)
-    assert con.execute("select result from tasks where id=7").fetchone()[0] == "real"
+    assert con.execute("select status, result from tasks where id=7").fetchone()["result"] == "real"
+
+
+def test_raise_checkin_parks_task_so_reconcile_cannot_close_it():
+    import server as srv
+    import supervisor
+    con = db()
+    con.execute("insert into missions(id, goal, created, run_until, budget_wakes, status) values(1,'g',0,9e12,40,'running')")
+    con.execute("insert into tasks(id, mission_id, title, status, created) values(5,1,'decide','doing',0)")
+    srv.raise_checkin(1, "blue or red?", kind="answer", task_id=5)
+    assert con.execute("select status from tasks where id=5").fetchone()[0] == "waiting"  # parked, not doing
+    supervisor._reconcile_task(99, 5)  # a wake ending now must leave a parked task alone
+    assert con.execute("select status from tasks where id=5").fetchone()[0] == "waiting"
+
+
+def test_free_form_answer_resumes_task_and_carries_the_text_into_its_detail():
+    import supervisor
+    con = db()
+    con.execute("insert into missions(id, goal, created, run_until, budget_wakes, status) values(1,'g',0,9e12,40,'waiting')")
+    con.execute("insert into tasks(id, mission_id, title, detail, status, created) values(5,1,'pick','base','waiting',0)")
+    con.execute("insert into checkins(id, mission_id, task_id, kind, question, answer, ts) "
+                "values(9,1,5,'answer','blue or red?','use the blue one',0)")
+    supervisor._apply_answers(con, con.execute("select * from missions where id=1").fetchone())
+    t = con.execute("select status, detail from tasks where id=5").fetchone()
+    assert t["status"] == "todo" and "use the blue one" in t["detail"]  # answer reaches the next wake
+
+
+def test_natural_language_approval_is_not_silently_dropped():
+    import supervisor
+    con = db()
+    con.execute("insert into missions(id, goal, created, run_until, budget_wakes, status) values(1,'g',0,9e12,40,'waiting')")
+    con.execute("insert into tasks(id, mission_id, title, needs_you, status, created) values(5,1,'post',1,'todo',0)")
+    con.execute("insert into checkins(id, mission_id, task_id, kind, question, answer, ts) "
+                "values(9,1,5,'approve','approve or skip?','sure, go for it',0)")
+    supervisor._apply_answers(con, con.execute("select * from missions where id=1").fetchone())
+    assert con.execute("select needs_you from tasks where id=5").fetchone()[0] == 0  # 'sure, go for it' = approve
+
+
+def test_quiet_hours_defers_a_worker_wake_then_delivers_it(fresh, monkeypatch):
+    con = db()
+    server.add_worker("counter", "x", COUNTER, interval_seconds=5, reaction="say hi")
+    monkeypatch.setattr(supervisor, "settings", lambda: {**DEFAULTS, "quiet_hours": [0, 24]})  # quiet all day
+    for _ in range(2):  # baseline, then one new item during quiet hours
+        con.execute("update workers set next_run=0")
+        supervisor.tick(con)
+    assert fresh == [] and con.execute("select woke from notes").fetchone()[0] == -2  # held, not dropped
+    monkeypatch.setattr(supervisor, "settings", lambda: dict(DEFAULTS))  # quiet hours end
+    supervisor._wake_deferred(con)
+    assert len(fresh) == 1 and "item 1" in fresh[0]
+    assert con.execute("select woke from notes").fetchone()[0] == 1  # delivered
+
+
+def test_a_burst_in_one_check_is_one_wake_not_one_per_note(fresh):
+    con = db()
+    server.add_worker("grades", "when grades post, summarize", "def check(state):\n"
+                      "    if state.get('seen'): return None\n    state['seen']=True\n"
+                      "    return ['g1','g2','g3','g4','g5']", interval_seconds=5, reaction="summarize")
+    con.execute("update workers set next_run=0")
+    supervisor.tick(con)
+    assert con.execute("select count(*) from notes").fetchone()[0] == 5  # all recorded
+    assert len(fresh) == 1 and all(f"g{i}" in fresh[0] for i in range(1, 6))  # one wake carrying all five

@@ -22,14 +22,30 @@ Part of the Jitter family (Screen, Queue, Agentic). Works alone; Claude is the o
 A worker is a Python file defining `check(state)` that returns a note, a list of notes, or `None`. `state` persists
 between checks so it reports only what's new. Workers only observe; acting is the reaction's job.
 
-## Safety
+## Safety — read this honestly
 
-- A woken Claude runs with `--permission-mode dontAsk` and only the tools in `wake_tools` (default: Jitter Screen
-  and Queue). Anything else is refused, not prompted.
-- Notes are passed as data, on stdin, never on the command line, and the prompt tells Claude not to follow
-  instructions inside them.
-- At most `max_wakes_per_hour` wakes per worker (default 6). `pause()` stops everything.
-- Settings live in `settings.json`: `paused`, `wake_tools`, `max_wakes_per_hour`, `wake_timeout_s`.
+A worker is Python that Claude wrote, run **as you, headless, on an interval, forever**. The import guard in
+`run_worker.py` blocks the obvious GUI-automation libraries so an honest "watch" worker that was mistakenly
+written to "act" fails in `test_worker()` instead of at 3am. It is **a guard, not a sandbox**: `os`, `subprocess`,
+`ctypes` and outbound `urllib` are all reachable, so treat a worker (and the note text it produces) as able to do
+anything you can. Review a worker's reaction before you approve it, and keep `permissions` tight on missions.
+
+What the mechanism actually gives you:
+
+- A woken Claude runs with `--permission-mode dontAsk` and only the whole tool-servers in `wake_tools` (default:
+  Jitter Screen and Queue). This refuses *other* servers, but `mcp__jitter` is full control of the mouse,
+  keyboard and screen — so this bounds *which* integrations a wake can touch, not how much it can do on the
+  desktop. It is coarse on purpose; it is not a fine-grained permission.
+- Note text is passed as data on stdin (never the command line, so it can't become a shell command) inside a
+  random per-wake fence, and the prompt tells Claude it is data. That defeats a shell-injection and a
+  fence-forging note; it is **not** a guarantee against prompt-injection of an LLM. Assume a hostile note can try
+  to steer the wake, and set reactions you'd trust with that.
+- At most `max_wakes_per_hour` wakes per worker (default 6); a burst in one check is batched into a single wake so
+  it isn't lost to that cap. `quiet_hours` holds screen wakes overnight (and delivers held notes after). `pause()`
+  stops everything.
+
+Settings live in `settings.json`: `paused`, `wake_tools`, `max_wakes_per_hour`, `wake_timeout_s`,
+`quiet_hours` (e.g. `[23, 7]`), `always_ask` (phrases the mission planner must hand back to you, never do alone).
 
 ## Setup
 

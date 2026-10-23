@@ -22,7 +22,7 @@ try {{
 
 
 def _ps_literal(s: str) -> str:
-    return "'" + str(s).replace("'", "''")[:300] + "'"
+    return "'" + str(s)[:300].replace("'", "''") + "'"  # truncate first, then double quotes, so '' can't be cut in half
 
 
 def notify(title: str, body: str = "") -> None:

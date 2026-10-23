@@ -51,14 +51,20 @@ def _migrate(con) -> None:
         con.execute("alter table checkins add column applied int default 0")
 
 
+_READY = False  # build the schema once per process, not on every connect (tick opens one a second)
+
+
 def db() -> sqlite3.Connection:
+    global _READY
     STATE.mkdir(parents=True, exist_ok=True)
     WORKERS.mkdir(exist_ok=True)
     con = sqlite3.connect(DB, timeout=15, isolation_level=None)  # autocommit; the server and supervisor share it
     con.row_factory = sqlite3.Row
     con.execute("pragma journal_mode=wal")
-    con.executescript(SCHEMA)
-    _migrate(con)
+    if not _READY:
+        con.executescript(SCHEMA)
+        _migrate(con)
+        _READY = True
     return con
 
 
