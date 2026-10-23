@@ -68,6 +68,14 @@ That sets up Screen, registers it with Claude Code and adds **Jitter** to the St
   Jitter can't see anything until you click done.
 - Queue's woken Claude can only use the tools you allow, and treats what workers notice as data, never as
   instructions.
+  
+## Upcoming (Next Commit)
+
+1. Polishing Jitter: Queue through deployment. Currently bug testing this through direct use for improvements
+   and unknown bugs. Fixing what I can find while using it.
+2. Establishing the beta version of Jitter: Agentic.
+3. Expected small and less significant additions to Jitter: Screen.
+4. Expected small and less significant additions and tweaks to the control panel.
 
 ## License
 
